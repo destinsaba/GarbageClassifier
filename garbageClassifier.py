@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from torchvision import transforms, models, datasets
 import torchvision.transforms.functional as F
-from torchvision.models import resnet18
+from torchvision.models import resnet18, ResNet18_Weights
 from transformers import DistilBertTokenizer, DistilBertModel
 from PIL import Image
 import os
@@ -24,7 +24,6 @@ TEST_PATH = r"/Users/destinsaba/Documents/MEng/ENEL_645/dataset_group_5/test"
 
 # load tokenizer and model for the text data
 tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
-bert_model = DistilBertModel.from_pretrained('distilbert-base-uncased')
 
 # Define transformations for the images
 transform = {
@@ -76,6 +75,54 @@ datasets = {
     "val": ImageTextDataset(VAL_PATH, transform=transform["val"], tokenizer=tokenizer),
     "test": ImageTextDataset(TEST_PATH, transform=transform["test"], tokenizer=tokenizer),
 }
+
+class ImageTextClassifier(nn.Module):
+    def __init__(self, num_classes):
+        super(ImageTextClassifier, self).__init__()
+
+        # Image feature extractor
+        self.image_extractor = models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
+
+        # Freeze the weights of the image extractor
+        for param in self.image_extractor.parameters():
+            param.requires_grad = False
+
+        # Remove the final layer of the image extractor
+        self.image_extractor.fc = nn.Identity()
+
+        # Text feature extractor
+        self.text_extractor = DistilBertModel.from_pretrained('distilbert-base-uncased')
+
+        # Freeze DistilBert weights
+        for param in self.text_extractor.parameters():
+            param.requires_grad = False
+
+        # Reduce text feature dimensionality
+        self.text_fc = nn.Linear(self.text_extractor.config.hidden_size, 256)
+
+        # Classifier (image output size is 512, text output size is 256)
+        self.classifier = nn.Linear(512 + 256, num_classes)
+
+    def forward(self, images, input_ids, attention_mask):
+        # Extract image features
+        image_features = self.image_extractor(images)
+
+        # Extract text features
+        text_outputs = self.text_extractor(input_ids=input_ids, attention_mask=attention_mask)
+
+        # Reduce text feature dimensionality
+        text_features = text_outputs.last_hidden_state[:, 0, :]
+        text_features = self.text_fc(text_features)
+
+        # Concatenate image and text features
+        features = torch.cat((image_features, text_features), dim=1)
+
+        # Classify
+        output = self.classifier(features)
+
+        return output
+        
+
 
 
 
