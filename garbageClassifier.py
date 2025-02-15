@@ -12,14 +12,14 @@ import os
 from sklearn.metrics import precision_recall_fscore_support
 
 # define data location on cluster
-# TRAIN_PATH  = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Train"
-# VAL_PATH    = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Val"
-# TEST_PATH   = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Test"
+TRAIN_PATH  = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Train"
+VAL_PATH    = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Val"
+TEST_PATH   = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Test"
 
 # define data location on local machine
-TRAIN_PATH = r"/Users/destinsaba/Documents/MEng/ENEL_645/dataset_group_5/train"
-VAL_PATH = r"/Users/destinsaba/Documents/MEng/ENEL_645/dataset_group_5/val"
-TEST_PATH = r"/Users/destinsaba/Documents/MEng/ENEL_645/dataset_group_5/test"
+#TRAIN_PATH = r"/Users/destinsaba/Documents/MEng/ENEL_645/dataset_group_5/train"
+#VAL_PATH = r"/Users/destinsaba/Documents/MEng/ENEL_645/dataset_group_5/val"
+#TEST_PATH = r"/Users/destinsaba/Documents/MEng/ENEL_645/dataset_group_5/test"
 
 # load tokenizer and model for the text data
 tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
@@ -262,7 +262,7 @@ def plot_training_history(history):
     plt.tight_layout()
     plt.savefig('training_history.png')
 
-BATCH_SIZE = 4
+BATCH_SIZE = 32
 NUM_CLASSES = 4
 LEARNING_RATE = 0.001
 WEIGHT_DECAY = 1e-4
