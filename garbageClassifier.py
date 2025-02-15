@@ -6,11 +6,10 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from torchvision import transforms, models, datasets
-import torchvision.transforms.functional as F
-from torchvision.models import resnet18, ResNet18_Weights
+from torchvision.models import ResNet18_Weights
 from transformers import DistilBertTokenizer, DistilBertModel
-from PIL import Image
 import os
+from sklearn.metrics import precision_recall_fscore_support
 
 # define data location on cluster
 # TRAIN_PATH  = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Train"
@@ -30,6 +29,8 @@ transform = {
     "train": transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(15),
+        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
     ]),
@@ -49,32 +50,32 @@ transform = {
 class ImageTextDataset(Dataset):
     def __init__(self, root_dir, transform=None, tokenizer=None):
         self.dataset = datasets.ImageFolder(root=root_dir, transform=transform)
-        self.tokenizer = tokenizer
-        self.samples = [(img_path, label) for img_path, label in self.dataset.samples]
-        
+        self.tokenizer = tokenizer  # Store tokenizer reference
+
     def __len__(self):
-        return len(self.samples)
+        return len(self.dataset.samples)
 
     def __getitem__(self, idx):
-        img_path, label = self.samples[idx]
+        img_path, label = self.dataset.samples[idx]
         
-        # Load image
+        # Load and transform image
         image = self.dataset.loader(img_path)
         if self.dataset.transform:
             image = self.dataset.transform(image)
         
         # Extract filename text and tokenize
-        filename = os.path.basename(img_path).split('.')[0]  # Remove extension
-        text_inputs = self.tokenizer(filename, padding='max_length', truncation=True, max_length=32, return_tensors="pt")
+        filename = os.path.splitext(os.path.basename(img_path))[0]  # Safer file parsing
+        text_inputs = self.tokenizer(filename, padding="max_length", truncation=True, max_length=32, return_tensors="pt")
         
-        return image, text_inputs["input_ids"].squeeze(0), text_inputs["attention_mask"].squeeze(0), label
+        input_ids = text_inputs["input_ids"]
+        attention_mask = text_inputs["attention_mask"]
+        if input_ids.dim() > 1:
+            input_ids = input_ids.squeeze(0)
+        if attention_mask.dim() > 1:
+            attention_mask = attention_mask.squeeze(0)
+        
+        return image, input_ids, attention_mask, label
 
-# Load datasets
-datasets = {
-    "train": ImageTextDataset(TRAIN_PATH, transform=transform["train"], tokenizer=tokenizer),
-    "val": ImageTextDataset(VAL_PATH, transform=transform["val"], tokenizer=tokenizer),
-    "test": ImageTextDataset(TEST_PATH, transform=transform["test"], tokenizer=tokenizer),
-}
 
 class ImageTextClassifier(nn.Module):
     def __init__(self, num_classes):
@@ -93,9 +94,12 @@ class ImageTextClassifier(nn.Module):
         # Text feature extractor
         self.text_extractor = DistilBertModel.from_pretrained('distilbert-base-uncased')
 
-        # Freeze DistilBert weights
-        for param in self.text_extractor.parameters():
-            param.requires_grad = False
+        # Freeze first 4 layers of the text extractor, unfreeze last 2 for fine-tuning
+        for i, param in enumerate(self.text_extractor.parameters()):
+            if i < len(list(self.text_extractor.parameters())) - 2:
+                param.requires_grad = False
+            else:
+                param.requires_grad = True
 
         # Reduce text feature dimensionality
         self.text_fc = nn.Linear(self.text_extractor.config.hidden_size, 256)
@@ -121,39 +125,240 @@ class ImageTextClassifier(nn.Module):
         output = self.classifier(features)
 
         return output
-        
-
-
-
-
-# The following code is temporary and just tests the dataset class / helps understand the tokenizer / preprocessing
-
-# Print count of samples per class for train, val, and test datasets
-for split in ["train", "val", "test"]:
-    labels = []
-    for _, _, _, label in datasets[split]:
-        labels.append(label)
     
-    unique_labels, counts = np.unique(labels, return_counts=True)
-    print(f"{split} dataset class counts:")
-    for label, count in zip(unique_labels, counts):
-        print(f"Class {label}: {count} samples")
+def train_model(model, trainloader, valloader, criterion, optimizer, scheduler=None, num_epochs=20, path='./best_model.pth', patience=5):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)  # Move model to GPU if available
+    best_val_loss = np.inf
+    epochs_no_improve = 0
 
-# Display a sample image and its corresponding tokenized input IDs
-sample_image, sample_input_ids, sample_attention_mask, sample_label = datasets["train"][0]
-print(f"Image shape: {sample_image.shape}")
+    history = {
+        'train_loss': [], 'val_loss': [],
+        'train_acc': [], 'val_acc': []
+    }
 
-# These come from the DistilBert tokenizer and are not interpretable
-print(f"Tokenized input IDs: {sample_input_ids}")
-print(f"Attention Mask: {sample_attention_mask}")
+    for epoch in range(num_epochs):
+        print(f"Epoch {epoch+1}/{num_epochs}")
+        print("-" * 10)
 
-decoded_text = tokenizer.decode(sample_input_ids, skip_special_tokens=True)
-print(decoded_text)  
+        for phase in ["train", "val"]:
+            if phase == "train":
+                model.train()
+            else:
+                model.eval()
+
+            running_loss = 0.0
+            running_corrects = 0
+            total = 0
+
+            for images, input_ids, attention_mask, labels in (trainloader if phase == "train" else valloader):
+                images, input_ids, attention_mask, labels = (
+                    images.to(device), input_ids.to(device), attention_mask.to(device), labels.to(device)
+                )
+
+                optimizer.zero_grad()
+
+                with torch.set_grad_enabled(phase == "train"):
+                    outputs = model(images, input_ids, attention_mask)
+                    loss = criterion(outputs, labels)
+
+                    if phase == "train":
+                        loss.backward()
+                        optimizer.step()
+
+                # Statistics
+                _, preds = torch.max(outputs, 1)
+                running_loss += loss.item() * images.size(0)
+                running_corrects += torch.sum(preds == labels).item()
+                total += labels.size(0)
+
+            epoch_loss = running_loss / total
+            epoch_acc = running_corrects / total
+            
+            print(f"{phase.capitalize()} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
+            
+            # Save history
+            if phase == 'train':
+                history['train_loss'].append(epoch_loss)
+                history['train_acc'].append(epoch_acc)
+            else:
+                history['val_loss'].append(epoch_loss)
+                history['val_acc'].append(epoch_acc)
+
+            if phase == "val":
+                if scheduler is not None:
+                    if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                        scheduler.step(epoch_loss)
+                    else:
+                        scheduler.step()
+                
+                if epoch_loss < best_val_loss:
+                    best_val_loss = epoch_loss
+                    torch.save(model.state_dict(), path)
+                    print("Model saved!")
+                    epochs_no_improve = 0
+                else:
+                    epochs_no_improve += 1
+                    if epochs_no_improve >= patience:
+                        print(f"Early stopping triggered after {epoch+1} epochs")
+                        return model, history
+
+    print("Training complete")
+    return model, history
+
+def evaluate_model(model, dataloader, criterion, device):
+    model.eval()
+    running_loss = 0.0
+    y_true, y_pred = [], []
+    
+    with torch.no_grad():
+        for images, input_ids, attention_mask, labels in dataloader:
+            images, input_ids, attention_mask, labels = (
+                images.to(device), input_ids.to(device), attention_mask.to(device), labels.to(device)
+            )
+            
+            outputs = model(images, input_ids, attention_mask)
+            loss = criterion(outputs, labels)
+            
+            running_loss += loss.item() * images.size(0)
+            _, preds = torch.max(outputs, 1)
+            
+            y_true.extend(labels.cpu().numpy())
+            y_pred.extend(preds.cpu().numpy())
+    
+    # Calculate metrics
+    avg_loss = running_loss / len(dataloader.dataset)
+    accuracy = np.mean(np.array(y_true) == np.array(y_pred))
+    precision, recall, f1, _ = precision_recall_fscore_support(y_true, y_pred, average='weighted')
+    
+    return {
+        'loss': avg_loss,
+        'accuracy': accuracy,
+        'precision': precision,
+        'recall': recall,
+        'f1': f1
+    }
+
+def plot_training_history(history):
+    # Plot loss
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 2, 1)
+    plt.plot(history['train_loss'], label='Train Loss')
+    plt.plot(history['val_loss'], label='Validation Loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.title('Training and Validation Loss')
+    
+    # Plot accuracy
+    plt.subplot(1, 2, 2)
+    plt.plot(history['train_acc'], label='Train Accuracy')
+    plt.plot(history['val_acc'], label='Validation Accuracy')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy')
+    plt.legend()
+    plt.title('Training and Validation Accuracy')
+    
+    plt.tight_layout()
+    plt.savefig('training_history.png')
+
+BATCH_SIZE = 4
+NUM_CLASSES = 4
+LEARNING_RATE = 0.001
+WEIGHT_DECAY = 1e-4
+MODEL_PATH = "./best_model.pth"
+PATIENCE = 5
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
+# Load datasets
+datasets = {
+    "train": ImageTextDataset(TRAIN_PATH, transform=transform["train"], tokenizer=tokenizer),
+    "val": ImageTextDataset(VAL_PATH, transform=transform["val"], tokenizer=tokenizer),
+    "test": ImageTextDataset(TEST_PATH, transform=transform["test"], tokenizer=tokenizer),
+}
+
+print(f"Dataset sizes - Train: {len(datasets['train'])}, Val: {len(datasets['val'])}, Test: {len(datasets['test'])}")
+
+# Create dataloaders
+dataloaders = {
+    "train": DataLoader(datasets["train"], batch_size=BATCH_SIZE, shuffle=True),
+    "val": DataLoader(datasets["val"], batch_size=BATCH_SIZE, shuffle=False),
+    "test": DataLoader(datasets["test"], batch_size=BATCH_SIZE, shuffle=False),
+}
+
+# Instantiate the model
+model = ImageTextClassifier(num_classes=NUM_CLASSES)
+
+# Define loss function and optimizer
+criterion = nn.CrossEntropyLoss()
+optimizer = torch.optim.AdamW(
+    filter(lambda p: p.requires_grad, model.parameters()),
+    lr=LEARNING_RATE, 
+    weight_decay=WEIGHT_DECAY
+)
+
+# Define scheduler
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    optimizer, 'min', patience=3, factor=0.1
+)
+
+# Train the model
+model, history = train_model(
+    model, 
+    dataloaders["train"], 
+    dataloaders["val"], 
+    criterion, 
+    optimizer,
+    scheduler=scheduler,
+    num_epochs=20, 
+    path=MODEL_PATH,
+    patience=PATIENCE
+)
+
+# Plot training history
+plot_training_history(history)
+
+# Load the best model and evaluate on the test set
+best_model = ImageTextClassifier(num_classes=NUM_CLASSES)
+best_model.load_state_dict(torch.load(MODEL_PATH, map_location=device, weights_only=True))
+model.to(device)  # Move model to the correct device
 
 
-print(f"Label: {sample_label}")
+# Evaluate on test set
+test_metrics = evaluate_model(best_model, dataloaders["test"], criterion, device)
 
-# The image looks weird since it is normalized (PIL is used to display the tensor)
-plt.imshow(F.to_pil_image(sample_image))
-plt.axis("off")
-plt.show()
+print("\nTest Set Metrics:")
+print(f"Loss: {test_metrics['loss']:.4f}")
+print(f"Accuracy: {test_metrics['accuracy']:.4f}")
+print(f"Precision: {test_metrics['precision']:.4f}")
+print(f"Recall: {test_metrics['recall']:.4f}")
+print(f"F1 Score: {test_metrics['f1']:.4f}")
+
+# Get class names from the dataset
+class_names = datasets['test'].dataset.classes
+print(f"\nClasses: {class_names}")
+
+# Confusion matrix and per-class metrics
+y_true, y_pred = [], []
+with torch.no_grad():
+    for images, input_ids, attention_mask, labels in dataloaders["test"]:
+        images, input_ids, attention_mask, labels = (
+            images.to(device), input_ids.to(device), attention_mask.to(device), labels.to(device)
+        )
+        outputs = best_model(images, input_ids, attention_mask)
+        _, preds = torch.max(outputs, 1)
+        y_true.extend(labels.cpu().numpy())
+        y_pred.extend(preds.cpu().numpy())
+
+# Compute per-class metrics
+precision, recall, f1, support = precision_recall_fscore_support(y_true, y_pred)
+
+print("\nPer-class metrics:")
+for i, class_name in enumerate(class_names):
+    print(f"{class_name}:")
+    print(f"  Precision: {precision[i]:.4f}")
+    print(f"  Recall: {recall[i]:.4f}")
+    print(f"  F1 Score: {f1[i]:.4f}")
+    print(f"  Support: {support[i]}")
