@@ -207,6 +207,7 @@ def train_model(model, trainloader, valloader, criterion, optimizer, scheduler=N
     return model, history
 
 def evaluate_model(model, dataloader, criterion, device):
+    model.to(device)
     model.eval()
     running_loss = 0.0
     y_true, y_pred = [], []
@@ -301,7 +302,7 @@ optimizer = torch.optim.AdamW(
 
 # Define scheduler
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-    optimizer, 'min', patience=3, factor=0.1
+    optimizer, 'max', patience=2, factor=0.1
 )
 
 # Train the model

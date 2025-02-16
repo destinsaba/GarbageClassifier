@@ -8,10 +8,11 @@
 #SBATCH --time=0-20:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --partition=gpu
+#SBATCH --gpus-per-node=1
 #SBATCH --output=job_output.log
 # ==================================
 
 source ~/software/init-conda
 conda activate pytorch
 
-python garbageClassifier.py
+python /home/destin.saba/transfer-learning/garbageClassifer.py
