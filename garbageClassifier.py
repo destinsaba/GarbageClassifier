@@ -12,16 +12,16 @@ import os
 from sklearn.metrics import precision_recall_fscore_support
 
 # define data location on cluster
-TRAIN_PATH  = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Train"
-VAL_PATH    = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Val"
-TEST_PATH   = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Test"
+# TRAIN_PATH  = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Train"
+# VAL_PATH    = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Val"
+# TEST_PATH   = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Test"
 
 # define data location on local machine
-# with open('localpaths.txt', 'r') as file:
-#     lines = file.readlines()
-# TRAIN_PATH = lines[0].strip()
-# VAL_PATH = lines[1].strip()
-# TEST_PATH = lines[2].strip()
+with open('localpaths.txt', 'r') as file:
+    lines = file.readlines()
+TRAIN_PATH = lines[0].strip()
+VAL_PATH = lines[1].strip()
+TEST_PATH = lines[2].strip()
 
 # load tokenizer and model for the text data
 tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
@@ -80,7 +80,7 @@ class ImageTextDataset(Dataset):
 
 
 class ImageTextClassifier(nn.Module):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, dropout_rate=0.0):
         super(ImageTextClassifier, self).__init__()
 
         # Image feature extractor
@@ -105,6 +105,9 @@ class ImageTextClassifier(nn.Module):
 
         # Reduce text feature dimensionality
         self.text_fc = nn.Linear(self.text_extractor.config.hidden_size, 256)
+        
+        # Dropout layer
+        self.dropout = nn.Dropout(dropout_rate)
 
         # Classifier (image output size is 512, text output size is 256)
         self.classifier = nn.Linear(512 + 256, num_classes)
@@ -122,6 +125,9 @@ class ImageTextClassifier(nn.Module):
 
         # Concatenate image and text features
         features = torch.cat((image_features, text_features), dim=1)
+        
+        # Apply dropout
+        features = self.dropout(features)
 
         # Classify
         output = self.classifier(features)
@@ -265,15 +271,19 @@ def plot_training_history(history):
     plt.tight_layout()
     plt.savefig('training_history.png')
 
-# Hyperparameter definitions for easier tuning
-BATCH_SIZE = 16
+MODEL_PATH = "./best_model.pth"
 NUM_CLASSES = 4
+
+# Hyperparameter definitions for easier tuning
+BATCH_SIZE = 32
 LEARNING_RATE = 0.001
 LR_DECAY_FACTOR = 0.1
 WEIGHT_DECAY = 1e-4
-MODEL_PATH = "./best_model.pth"
 PATIENCE = 5
 SCHEDULER = 1
+DROPOUT_RATE = 0.3
+OPTIMIZER = 1
+MOMENTUM = 0.9
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
@@ -295,15 +305,24 @@ dataloaders = {
 }
 
 # Instantiate the model
-model = ImageTextClassifier(num_classes=NUM_CLASSES)
+model = ImageTextClassifier(num_classes=NUM_CLASSES, dropout_rate=DROPOUT_RATE)
 
 # Define loss function and optimizer
 criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.AdamW(
-    filter(lambda p: p.requires_grad, model.parameters()),
-    lr=LEARNING_RATE, 
-    weight_decay=WEIGHT_DECAY
-)
+
+if OPTIMIZER == 1:
+    optimizer = torch.optim.AdamW(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=LEARNING_RATE, 
+        weight_decay=WEIGHT_DECAY
+    )
+else :
+    optimizer = torch.optim.SGD(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=LEARNING_RATE, 
+        weight_decay=WEIGHT_DECAY,
+        momentum=MOMENTUM
+    )
 
 # Define scheduler
 if SCHEDULER == 1:
