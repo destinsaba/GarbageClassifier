@@ -1,0 +1,3 @@
+/example/full/path1
+/example/full/path2
+/example/full/path3

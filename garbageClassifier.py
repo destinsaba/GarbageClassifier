@@ -17,9 +17,11 @@ VAL_PATH    = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Val"
 TEST_PATH   = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Test"
 
 # define data location on local machine
-#TRAIN_PATH = r"/Users/destinsaba/Documents/MEng/ENEL_645/dataset_group_5/train"
-#VAL_PATH = r"/Users/destinsaba/Documents/MEng/ENEL_645/dataset_group_5/val"
-#TEST_PATH = r"/Users/destinsaba/Documents/MEng/ENEL_645/dataset_group_5/test"
+# with open('localpaths.txt', 'r') as file:
+#     lines = file.readlines()
+# TRAIN_PATH = lines[0].strip()
+# VAL_PATH = lines[1].strip()
+# TEST_PATH = lines[2].strip()
 
 # load tokenizer and model for the text data
 tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
