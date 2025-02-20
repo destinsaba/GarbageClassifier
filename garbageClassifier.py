@@ -265,9 +265,9 @@ def plot_training_history(history):
     plt.tight_layout()
     plt.savefig('training_history.png')
 
-BATCH_SIZE = 32
+BATCH_SIZE = 16
 NUM_CLASSES = 4
-LEARNING_RATE = 0.001
+LEARNING_RATE = 0.01
 WEIGHT_DECAY = 1e-4
 MODEL_PATH = "./best_model.pth"
 PATIENCE = 5
