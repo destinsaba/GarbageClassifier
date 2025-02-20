@@ -12,16 +12,16 @@ import os
 from sklearn.metrics import precision_recall_fscore_support
 
 # define data location on cluster
-# TRAIN_PATH  = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Train"
-# VAL_PATH    = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Val"
-# TEST_PATH   = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Test"
+TRAIN_PATH  = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Train"
+VAL_PATH    = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Val"
+TEST_PATH   = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Test"
 
 # define data location on local machine
-with open('localpaths.txt', 'r') as file:
-    lines = file.readlines()
-TRAIN_PATH = lines[0].strip()
-VAL_PATH = lines[1].strip()
-TEST_PATH = lines[2].strip()
+# with open('localpaths.txt', 'r') as file:
+#     lines = file.readlines()
+# TRAIN_PATH = lines[0].strip()
+# VAL_PATH = lines[1].strip()
+# TEST_PATH = lines[2].strip()
 
 # load tokenizer and model for the text data
 tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
