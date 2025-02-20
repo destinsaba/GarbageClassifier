@@ -265,12 +265,15 @@ def plot_training_history(history):
     plt.tight_layout()
     plt.savefig('training_history.png')
 
+# Hyperparameter definitions for easier tuning
 BATCH_SIZE = 16
 NUM_CLASSES = 4
-LEARNING_RATE = 0.01
+LEARNING_RATE = 0.001
+LR_DECAY_FACTOR = 0.1
 WEIGHT_DECAY = 1e-4
 MODEL_PATH = "./best_model.pth"
 PATIENCE = 5
+SCHEDULER = 1
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
@@ -303,9 +306,18 @@ optimizer = torch.optim.AdamW(
 )
 
 # Define scheduler
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-    optimizer, 'max', patience=2, factor=0.1
-)
+if SCHEDULER == 1:
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, 'max', patience=2, factor=LR_DECAY_FACTOR
+    )
+elif SCHEDULER == 2:
+    scheduler = t= torch.optim.lr_scheduler.ExponentialLR(
+        optimizer, gamma=LR_DECAY_FACTOR
+    )
+else:
+    scheduler = torch.optim.lr_scheduler.StepLR(
+        optimizer, step_size=5, gamma=LR_DECAY_FACTOR
+    )
 
 # Train the model
 model, history = train_model(
