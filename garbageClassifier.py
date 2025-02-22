@@ -106,6 +106,9 @@ class ImageTextClassifier(nn.Module):
         # Reduce text feature dimensionality
         self.text_fc = nn.Linear(self.text_extractor.config.hidden_size, 256)
         
+        # Activation layer
+        self.relu = nn.ReLU()
+        
         # Dropout layer
         self.dropout = nn.Dropout(dropout_rate)
 
@@ -116,12 +119,18 @@ class ImageTextClassifier(nn.Module):
         # Extract image features
         image_features = self.image_extractor(images)
 
+        # Apply activation
+        image_features = self.relu(image_features)
+
         # Extract text features
         text_outputs = self.text_extractor(input_ids=input_ids, attention_mask=attention_mask)
 
         # Reduce text feature dimensionality
         text_features = text_outputs.last_hidden_state[:, 0, :]
         text_features = self.text_fc(text_features)
+        
+        # Apply activation
+        text_features = self.relu(text_features)
 
         # Concatenate image and text features
         features = torch.cat((image_features, text_features), dim=1)
