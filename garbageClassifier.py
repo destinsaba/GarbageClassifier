@@ -67,6 +67,7 @@ class ImageTextDataset(Dataset):
         
         # Extract filename text and tokenize
         filename = os.path.splitext(os.path.basename(img_path))[0]  # Safer file parsing
+        filename = filename.replace('_', ' ')
         text_inputs = self.tokenizer(filename, padding="max_length", truncation=True, max_length=32, return_tensors="pt")
         
         input_ids = text_inputs["input_ids"]
