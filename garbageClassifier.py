@@ -106,6 +106,9 @@ class ImageTextClassifier(nn.Module):
         # Reduce text feature dimensionality
         self.text_fc = nn.Linear(self.text_extractor.config.hidden_size, 256)
         
+        # Batch normalization
+        self.bn_text = nn.BatchNorm1d(256)
+        
         # Activation layer
         self.relu = nn.ReLU()
         
@@ -114,12 +117,15 @@ class ImageTextClassifier(nn.Module):
 
         # Classifier (image output size is 512, text output size is 256)
         self.classifier = nn.Linear(512 + 256, num_classes)
+        
+        # Combined batch normalization layer
+        self.bn_features = nn.BatchNorm1d(512 + 256)
 
     def forward(self, images, input_ids, attention_mask):
         # Extract image features
         image_features = self.image_extractor(images)
 
-        # Apply activation
+        # Apply activation on images
         image_features = self.relu(image_features)
 
         # Extract text features
@@ -129,11 +135,20 @@ class ImageTextClassifier(nn.Module):
         text_features = text_outputs.last_hidden_state[:, 0, :]
         text_features = self.text_fc(text_features)
         
-        # Apply activation
+        # Apply activation on text
         text_features = self.relu(text_features)
+        
+        # Apply batch normalization on text
+        text_features = self.bn_text(text_features)
 
         # Concatenate image and text features
         features = torch.cat((image_features, text_features), dim=1)
+        
+        # Apply activation on joined data
+        features = self.relu(features)
+        
+        # Apply batch normalization on joined data
+        features = self.bn_features(features)
         
         # Apply dropout
         features = self.dropout(features)
