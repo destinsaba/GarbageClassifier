@@ -67,6 +67,7 @@ class ImageTextDataset(Dataset):
         
         # Extract filename text and tokenize
         filename = os.path.splitext(os.path.basename(img_path))[0]  # Safer file parsing
+        filename = filename.replace('_', ' ')
         text_inputs = self.tokenizer(filename, padding="max_length", truncation=True, max_length=32, return_tensors="pt")
         
         input_ids = text_inputs["input_ids"]
@@ -106,15 +107,27 @@ class ImageTextClassifier(nn.Module):
         # Reduce text feature dimensionality
         self.text_fc = nn.Linear(self.text_extractor.config.hidden_size, 256)
         
+        # Batch normalization
+        self.bn_text = nn.BatchNorm1d(256)
+        
+        # Activation layer
+        self.relu = nn.ReLU()
+        
         # Dropout layer
         self.dropout = nn.Dropout(dropout_rate)
 
         # Classifier (image output size is 512, text output size is 256)
         self.classifier = nn.Linear(512 + 256, num_classes)
+        
+        # Combined batch normalization layer
+        self.bn_features = nn.BatchNorm1d(512 + 256)
 
     def forward(self, images, input_ids, attention_mask):
         # Extract image features
         image_features = self.image_extractor(images)
+
+        # Apply activation on images
+        image_features = self.relu(image_features)
 
         # Extract text features
         text_outputs = self.text_extractor(input_ids=input_ids, attention_mask=attention_mask)
@@ -122,9 +135,21 @@ class ImageTextClassifier(nn.Module):
         # Reduce text feature dimensionality
         text_features = text_outputs.last_hidden_state[:, 0, :]
         text_features = self.text_fc(text_features)
+        
+        # Apply activation on text
+        text_features = self.relu(text_features)
+        
+        # Apply batch normalization on text
+        text_features = self.bn_text(text_features)
 
         # Concatenate image and text features
         features = torch.cat((image_features, text_features), dim=1)
+        
+        # Apply activation on joined data
+        features = self.relu(features)
+        
+        # Apply batch normalization on joined data
+        features = self.bn_features(features)
         
         # Apply dropout
         features = self.dropout(features)
