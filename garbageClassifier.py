@@ -6,7 +6,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from torchvision import transforms, models, datasets
-from torchvision.models import ResNet18_Weights
+from torchvision.models import ResNet50_Weights
 from transformers import DistilBertTokenizer, DistilBertModel
 import os
 from sklearn.metrics import precision_recall_fscore_support
@@ -85,7 +85,7 @@ class ImageTextClassifier(nn.Module):
         super(ImageTextClassifier, self).__init__()
 
         # Image feature extractor
-        self.image_extractor = models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
+        self.image_extractor = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
 
         # Freeze the weights of the image extractor
         for param in self.image_extractor.parameters():
@@ -116,11 +116,11 @@ class ImageTextClassifier(nn.Module):
         # Dropout layer
         self.dropout = nn.Dropout(dropout_rate)
 
-        # Classifier (image output size is 512, text output size is 256)
-        self.classifier = nn.Linear(512 + 256, num_classes)
+        # Classifier (image output size is 2048, text output size is 256)
+        self.classifier = nn.Linear(2048 + 256, num_classes)
         
         # Combined batch normalization layer
-        self.bn_features = nn.BatchNorm1d(512 + 256)
+        self.bn_features = nn.BatchNorm1d(2048 + 256)
 
     def forward(self, images, input_ids, attention_mask):
         # Extract image features
