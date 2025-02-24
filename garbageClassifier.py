@@ -12,16 +12,16 @@ import os
 from sklearn.metrics import precision_recall_fscore_support
 
 # define data location on cluster
-TRAIN_PATH  = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Train"
-VAL_PATH    = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Val"
-TEST_PATH   = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Test"
+# TRAIN_PATH  = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Train"
+# VAL_PATH    = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Val"
+# TEST_PATH   = "/work/TALC/enel645_2025w/garbage_data/CVPR_2024_dataset_Test"
 
 # define data location on local machine
-# with open('localpaths.txt', 'r') as file:
-#     lines = file.readlines()
-# TRAIN_PATH = lines[0].strip()
-# VAL_PATH = lines[1].strip()
-# TEST_PATH = lines[2].strip()
+with open('localpaths.txt', 'r') as file:
+    lines = file.readlines()
+TRAIN_PATH = lines[0].strip()
+VAL_PATH = lines[1].strip()
+TEST_PATH = lines[2].strip()
 
 # load tokenizer and model for the text data
 tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
@@ -117,17 +117,19 @@ class ImageTextClassifier(nn.Module):
         self.dropout = nn.Dropout(dropout_rate)
 
         # Classifier (image output size is 512, text output size is 512)
-        self.classifier = nn.Linear(512 + 512, num_classes)
+        # self.classifier = nn.Linear(512 + 512, num_classes)
+        self.classifier = nn.Linear(512, num_classes)
         
         # Combined batch normalization layer
-        self.bn_features = nn.BatchNorm1d(512 + 512)
+        # self.bn_features = nn.BatchNorm1d(512 + 512)
+        self.bn_features = nn.BatchNorm1d(512)
 
     def forward(self, images, input_ids, attention_mask):
         # Extract image features
-        image_features = self.image_extractor(images)
+        # image_features = self.image_extractor(images)
 
         # Apply activation on images
-        image_features = self.relu(image_features)
+        # image_features = self.relu(image_features)
 
         # Extract text features
         text_outputs = self.text_extractor(input_ids=input_ids, attention_mask=attention_mask)
@@ -143,8 +145,8 @@ class ImageTextClassifier(nn.Module):
         text_features = self.relu(text_features)
 
         # Concatenate image and text features
-        features = torch.cat((image_features, text_features), dim=1)
-        
+        # features = torch.cat((image_features, text_features), dim=1)
+        features = text_features
         # Apply batch normalization on joined data
         features = self.bn_features(features)
         
@@ -314,19 +316,19 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 # Load datasets
-datasets = {
+data_sets = {
     "train": ImageTextDataset(TRAIN_PATH, transform=transform["train"], tokenizer=tokenizer),
     "val": ImageTextDataset(VAL_PATH, transform=transform["val"], tokenizer=tokenizer),
     "test": ImageTextDataset(TEST_PATH, transform=transform["test"], tokenizer=tokenizer),
 }
 
-print(f"Dataset sizes - Train: {len(datasets['train'])}, Val: {len(datasets['val'])}, Test: {len(datasets['test'])}")
+print(f"Dataset sizes - Train: {len(data_sets['train'])}, Val: {len(data_sets['val'])}, Test: {len(data_sets['test'])}")
 
 # Create dataloaders
 dataloaders = {
-    "train": DataLoader(datasets["train"], batch_size=BATCH_SIZE, shuffle=True),
-    "val": DataLoader(datasets["val"], batch_size=BATCH_SIZE, shuffle=False),
-    "test": DataLoader(datasets["test"], batch_size=BATCH_SIZE, shuffle=False),
+    "train": DataLoader(data_sets["train"], batch_size=BATCH_SIZE, shuffle=True),
+    "val": DataLoader(data_sets["val"], batch_size=BATCH_SIZE, shuffle=False),
+    "test": DataLoader(data_sets["test"], batch_size=BATCH_SIZE, shuffle=False),
 }
 
 # Instantiate the model
@@ -396,7 +398,7 @@ print(f"Recall: {test_metrics['recall']:.4f}")
 print(f"F1 Score: {test_metrics['f1']:.4f}")
 
 # Get class names from the dataset
-class_names = datasets['test'].dataset.classes
+class_names = data_sets['test'].dataset.classes
 print(f"\nClasses: {class_names}")
 
 # Confusion matrix and per-class metrics
