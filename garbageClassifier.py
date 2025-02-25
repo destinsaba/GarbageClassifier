@@ -1,4 +1,5 @@
 # import packages
+import re
 import torch
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,6 +10,7 @@ from torchvision import transforms, models, datasets
 from torchvision.models import ResNet18_Weights
 from transformers import DistilBertTokenizer, DistilBertModel
 import os
+from PIL import Image
 from sklearn.metrics import precision_recall_fscore_support
 
 # define data location on cluster
@@ -50,32 +52,64 @@ transform = {
 
 # class to load the dataset, assumes that image filenames are the relevant text
 class ImageTextDataset(Dataset):
-    def __init__(self, root_dir, transform=None, tokenizer=None):
-        self.dataset = datasets.ImageFolder(root=root_dir, transform=transform)
-        self.tokenizer = tokenizer  # Store tokenizer reference
-
+    def __init__(self, root_dir, tokenizer, max_len=32, transform=None):
+        self.root_dir = root_dir
+        self.transform = transform
+        self.tokenizer = tokenizer
+        self.max_len = max_len
+        
+        self.class_folders = sorted(os.listdir(root_dir))
+        self.class_map = {folder: idx for idx, folder in enumerate(self.class_folders)}
+        
+        self.image_paths = []
+        self.texts = []
+        self.labels = []
+        
+        # Collect data
+        for class_name in self.class_folders:
+            class_path = os.path.join(root_dir, class_name)
+            if os.path.isdir(class_path):
+                files = os.listdir(class_path)
+                for file_name in files:
+                    if file_name.endswith(('.jpg', '.jpeg', '.png')):
+                        img_path = os.path.join(class_path, file_name)
+                        self.image_paths.append(img_path)
+                        
+                        # Extract text from filename
+                        file_name_no_ext, _ = os.path.splitext(file_name)
+                        text = file_name_no_ext.replace('_', ' ')
+                        text_without_digits = re.sub(r'\d+', '', text)
+                        self.texts.append(text_without_digits)
+                        
+                        # Add label
+                        self.labels.append(self.class_map[class_name])
+    
     def __len__(self):
-        return len(self.dataset.samples)
-
+        return len(self.labels)
+    
     def __getitem__(self, idx):
-        img_path, label = self.dataset.samples[idx]
+        label = self.labels[idx]
         
-        # Load and transform image
-        image = self.dataset.loader(img_path)
-        if self.dataset.transform:
-            image = self.dataset.transform(image)
+        # Image processing
+        image_path = self.image_paths[idx]
+        # image = Image.open(image_path).convert('RGB')
+        # if self.transform:
+        #     image = self.transform(image)
+        image = 0
         
-        # Extract filename text and tokenize
-        filename = os.path.splitext(os.path.basename(img_path))[0]  # Safer file parsing
-        filename = filename.replace('_', ' ')
-        text_inputs = self.tokenizer(filename, padding="max_length", truncation=True, max_length=32, return_tensors="pt")
-        
-        input_ids = text_inputs["input_ids"]
-        attention_mask = text_inputs["attention_mask"]
-        if input_ids.dim() > 1:
-            input_ids = input_ids.squeeze(0)
-        if attention_mask.dim() > 1:
-            attention_mask = attention_mask.squeeze(0)
+        # Text processing
+        text = str(self.texts[idx])
+        encoding = self.tokenizer.encode_plus(
+            text,
+            add_special_tokens=True,
+            max_length=self.max_len,
+            padding='max_length',
+            truncation=True,
+            return_attention_mask=True,
+            return_tensors='pt'
+        )
+        input_ids = encoding['input_ids'].flatten()
+        attention_mask = encoding['attention_mask'].flatten()
         
         return image, input_ids, attention_mask, label
 
@@ -373,7 +407,7 @@ model, history = train_model(
     criterion, 
     optimizer,
     scheduler=scheduler,
-    num_epochs=20, 
+    num_epochs=5, 
     path=MODEL_PATH,
     patience=PATIENCE
 )
@@ -398,8 +432,8 @@ print(f"Recall: {test_metrics['recall']:.4f}")
 print(f"F1 Score: {test_metrics['f1']:.4f}")
 
 # Get class names from the dataset
-class_names = data_sets['test'].dataset.classes
-print(f"\nClasses: {class_names}")
+# class_names = data_sets['test'].dataset.classes
+# print(f"\nClasses: {class_names}")
 
 # Confusion matrix and per-class metrics
 y_true, y_pred = [], []
@@ -416,10 +450,10 @@ with torch.no_grad():
 # Compute per-class metrics
 precision, recall, f1, support = precision_recall_fscore_support(y_true, y_pred)
 
-print("\nPer-class metrics:")
-for i, class_name in enumerate(class_names):
-    print(f"{class_name}:")
-    print(f"  Precision: {precision[i]:.4f}")
-    print(f"  Recall: {recall[i]:.4f}")
-    print(f"  F1 Score: {f1[i]:.4f}")
-    print(f"  Support: {support[i]}")
+# print("\nPer-class metrics:")
+# for i, class_name in enumerate(class_names):
+#     print(f"{class_name}:")
+#     print(f"  Precision: {precision[i]:.4f}")
+#     print(f"  Recall: {recall[i]:.4f}")
+#     print(f"  F1 Score: {f1[i]:.4f}")
+#     print(f"  Support: {support[i]}")
