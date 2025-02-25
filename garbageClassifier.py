@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-from transformers import DistilBertModel, DistilBertTokenizer
+from transformers import DistilBertModel, DistilBertTokenizer, DistilBertConfig
 from torchvision import models, transforms
 from torchvision.models import ResNet50_Weights
 from PIL import Image
@@ -107,22 +107,27 @@ class MultimodalGarbageDataset(Dataset):
 
 # Image Model Component
 class ImageModel(nn.Module):
-    def __init__(self, num_classes, freeze_backbone=True):
+    def __init__(self, freeze_backbone=True):
         super(ImageModel, self).__init__()
-        self.model = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
-        
+        self.model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+
         if freeze_backbone:
             for param in self.model.parameters():
                 param.requires_grad = False
-        
-        # Replace the final fully connected layer
-        num_features = self.model.fc.in_features
-        self.model.fc = nn.Identity()  # Remove the final layer
-        self.fc = nn.Linear(num_features, 512)  # Add a new intermediate layer
+
+            for param in self.model.layer4.parameters():
+                param.requires_grad = True
+
+        self.model.fc = nn.Identity()  # Remove FC layer
+        self.avgpool = nn.AdaptiveAvgPool2d((1,1))  # Global Average Pooling
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(2048, 512)  # ResNet50's last feature layer outputs 2048-dim
         self.activation = nn.ReLU()
-        
+
     def forward(self, x):
-        features = self.model(x)
+        features = self.model(x)  # Extract deep features
+        features = self.avgpool(features.unsqueeze(-1).unsqueeze(-1))  # Ensure correct shape
+        features = self.flatten(features)
         output = self.fc(features)
         return self.activation(output)
 
@@ -131,57 +136,65 @@ class TextModel(nn.Module):
     def __init__(self, freeze_backbone=True):
         super(TextModel, self).__init__()
         self.distilbert = DistilBertModel.from_pretrained('distilbert-base-uncased')
-        
+
         if freeze_backbone:
             for param in self.distilbert.parameters():
                 param.requires_grad = False
 
             for param in self.distilbert.transformer.layer[-1].parameters():
                 param.requires_grad = True
-                
+
         self.fc = nn.Linear(self.distilbert.config.hidden_size, 512)
         self.activation = nn.ReLU()
-        
+
     def forward(self, input_ids, attention_mask):
         outputs = self.distilbert(input_ids=input_ids, attention_mask=attention_mask)
-        pooled_output = outputs[0][:, 0]  # Take the [CLS] token representation
+        pooled_output = outputs.last_hidden_state.mean(dim=1)  # Average Pooling
         return self.activation(self.fc(pooled_output))
+
 
 # Fusion Model
 class MultimodalGarbageClassifier(nn.Module):
     def __init__(self, num_classes, freeze_backbones=True):
         super(MultimodalGarbageClassifier, self).__init__()
-        self.image_model = ImageModel(num_classes, freeze_backbone=freeze_backbones)
+        self.image_model = ImageModel(freeze_backbone=freeze_backbones)
         self.text_model = TextModel(freeze_backbone=freeze_backbones)
-        
+
+        # Trainable gating mechanism instead of LearnableGate
+        self.gate = nn.Linear(1024, 1024)
+        self.sigmoid = nn.Sigmoid()
+
         # Fusion and classification layers
-        self.fusion = nn.Sequential(
-            nn.Linear(512 + 512, 256),
-            nn.ReLU(),
-            nn.Dropout(0.5)
-        )
-        
+        self.fusion = nn.Linear(1024, 256)
+        self.norm = nn.LayerNorm(256)
+        self.activation = nn.ReLU()
+        self.dropout = nn.Dropout(0.5)
         self.classifier = nn.Linear(256, num_classes)
-        
+
     def forward(self, image, input_ids, attention_mask):
         # Get embeddings from individual models
-        image_features = self.image_model(image)
-        text_features = self.text_model(input_ids, attention_mask)
+        image_features = self.image_model(image)  # Shape: (batch_size, 512)
+        text_features = self.text_model(input_ids, attention_mask)  # Shape: (batch_size, 512)
 
         # Normalize features
         image_features = nn.functional.normalize(image_features, p=2, dim=1)
         text_features = nn.functional.normalize(text_features, p=2, dim=1)
-        
-        # Concatenate features
-        combined_features = torch.cat((image_features, text_features), dim=1)
-        
+
+        # Concatenate features (Shape: (batch_size, 1024))
+        fused_features = torch.cat([image_features, text_features], dim=1)
+
+        # Apply gating mechanism correctly
+        gate_weights = self.sigmoid(self.gate(fused_features))  # Shape: (batch_size, 1024)
+        gated_features = fused_features * gate_weights  # Element-wise multiplication
+
         # Apply fusion network
-        fused_features = self.fusion(combined_features)
-        
+        fused_features = self.fusion(gated_features)  # Shape: (batch_size, 256)
+        fused_features = self.norm(fused_features)
+        fused_features = self.activation(fused_features)
+        fused_features = self.dropout(fused_features)
+
         # Final classification
-        output = self.classifier(fused_features)
-        
-        return output
+        return self.classifier(fused_features)
 
 # Training function
 def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device):
@@ -331,7 +344,7 @@ def main():
     model = MultimodalGarbageClassifier(num_classes, freeze_backbones=True).to(device)
     
     # Training parameters
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     optimizer = optim.AdamW(model.parameters(), lr=0.001)
     scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
     num_epochs = 20
