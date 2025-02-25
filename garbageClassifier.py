@@ -119,11 +119,12 @@ class ImageModel(nn.Module):
         num_features = self.model.fc.in_features
         self.model.fc = nn.Identity()  # Remove the final layer
         self.fc = nn.Linear(num_features, 512)  # Add a new intermediate layer
+        self.activation = nn.ReLU()
         
     def forward(self, x):
         features = self.model(x)
         output = self.fc(features)
-        return output
+        return self.activation(output)
 
 # Text Model Component
 class TextModel(nn.Module):
@@ -136,11 +137,12 @@ class TextModel(nn.Module):
                 param.requires_grad = False
                 
         self.fc = nn.Linear(self.distilbert.config.hidden_size, 512)
+        self.activation = nn.ReLU()
         
     def forward(self, input_ids, attention_mask):
         outputs = self.distilbert(input_ids=input_ids, attention_mask=attention_mask)
         pooled_output = outputs[0][:, 0]  # Take the [CLS] token representation
-        return self.fc(pooled_output)
+        return self.activation(self.fc(pooled_output))
 
 # Fusion Model
 class MultimodalGarbageClassifier(nn.Module):
@@ -316,7 +318,7 @@ def main():
         TEST_PATH, tokenizer, max_len, transform=test_transform)
     
     # Create data loaders
-    batch_size = 32
+    batch_size = 16
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
@@ -329,7 +331,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=0.001)
     scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
-    num_epochs = 5
+    num_epochs = 10
     
     # Train model
     print("Starting training...")
