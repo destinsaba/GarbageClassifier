@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from transformers import DistilBertModel, DistilBertTokenizer
 from torchvision import models, transforms
-from torchvision.models import ResNet18_Weights
+from torchvision.models import ResNet50_Weights
 from PIL import Image
 import os
 import numpy as np
@@ -109,7 +109,7 @@ class MultimodalGarbageDataset(Dataset):
 class ImageModel(nn.Module):
     def __init__(self, num_classes, freeze_backbone=True):
         super(ImageModel, self).__init__()
-        self.model = models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
+        self.model = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
         
         if freeze_backbone:
             for param in self.model.parameters():
@@ -135,6 +135,9 @@ class TextModel(nn.Module):
         if freeze_backbone:
             for param in self.distilbert.parameters():
                 param.requires_grad = False
+
+            for param in self.distilbert.transformer.layer[-1].parameters():
+                param.requires_grad = True
                 
         self.fc = nn.Linear(self.distilbert.config.hidden_size, 512)
         self.activation = nn.ReLU()
@@ -331,7 +334,7 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=0.001)
     scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
-    num_epochs = 10
+    num_epochs = 20
     
     # Train model
     print("Starting training...")
