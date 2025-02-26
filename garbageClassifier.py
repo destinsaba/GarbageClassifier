@@ -160,7 +160,7 @@ class MultimodalGarbageClassifier(nn.Module):
         self.image_model = ImageModel(freeze_backbone=freeze_backbones)
         self.text_model = TextModel(freeze_backbone=freeze_backbones)
 
-        # Trainable gating mechanism instead of LearnableGate
+        # Trainable gating mechanism that learns best combination of features
         self.gate = nn.Linear(1024, 1024)
         self.sigmoid = nn.Sigmoid()
 
@@ -183,7 +183,7 @@ class MultimodalGarbageClassifier(nn.Module):
         # Concatenate features (Shape: (batch_size, 1024))
         fused_features = torch.cat([image_features, text_features], dim=1)
 
-        # Apply gating mechanism correctly
+        # Apply gating mechanism
         gate_weights = self.sigmoid(self.gate(fused_features))  # Shape: (batch_size, 1024)
         gated_features = fused_features * gate_weights  # Element-wise multiplication
 
