@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-from transformers import DistilBertModel, DistilBertTokenizer, DistilBertConfig
+from transformers import DistilBertModel, DistilBertTokenizer
 from torchvision import models, transforms
 from torchvision.models import ResNet50_Weights
 from PIL import Image
@@ -27,6 +27,7 @@ train_transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.RandomHorizontalFlip(),
     transforms.RandomVerticalFlip(),
+    transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
@@ -109,7 +110,7 @@ class MultimodalGarbageDataset(Dataset):
 class ImageModel(nn.Module):
     def __init__(self, freeze_backbone=True):
         super(ImageModel, self).__init__()
-        self.model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+        self.model = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
 
         if freeze_backbone:
             for param in self.model.parameters():
@@ -160,7 +161,7 @@ class MultimodalGarbageClassifier(nn.Module):
         self.image_model = ImageModel(freeze_backbone=freeze_backbones)
         self.text_model = TextModel(freeze_backbone=freeze_backbones)
 
-        # Trainable gating mechanism that learns best combination of features
+        # Trainable gating mechanism
         self.gate = nn.Linear(1024, 1024)
         self.sigmoid = nn.Sigmoid()
 
@@ -168,7 +169,7 @@ class MultimodalGarbageClassifier(nn.Module):
         self.fusion = nn.Linear(1024, 256)
         self.norm = nn.LayerNorm(256)
         self.activation = nn.ReLU()
-        self.dropout = nn.Dropout(0.5)
+        self.dropout = nn.Dropout(0.4)
         self.classifier = nn.Linear(256, num_classes)
 
     def forward(self, image, input_ids, attention_mask):
@@ -183,7 +184,7 @@ class MultimodalGarbageClassifier(nn.Module):
         # Concatenate features (Shape: (batch_size, 1024))
         fused_features = torch.cat([image_features, text_features], dim=1)
 
-        # Apply gating mechanism
+        # Apply gating mechanism correctly
         gate_weights = self.sigmoid(self.gate(fused_features))  # Shape: (batch_size, 1024)
         gated_features = fused_features * gate_weights  # Element-wise multiplication
 
@@ -311,7 +312,7 @@ def evaluate_model(model, test_loader, device):
     accuracy = correct / total
     
     # Create classification report
-    class_names = ['Black', 'Blue', 'Green', 'TTR']
+    class_names = sorted(os.listdir(TRAIN_PATH))
     report = classification_report(all_labels, all_preds, target_names=class_names)
     
     # Create confusion matrix
@@ -334,7 +335,7 @@ def main():
         TEST_PATH, tokenizer, max_len, transform=test_transform)
     
     # Create data loaders
-    batch_size = 16
+    batch_size = 32
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
@@ -345,9 +346,9 @@ def main():
     
     # Training parameters
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-    optimizer = optim.AdamW(model.parameters(), lr=0.001)
+    optimizer = optim.AdamW(model.parameters(), lr=0.0005)
     scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
-    num_epochs = 20
+    num_epochs = 15
     
     # Train model
     print("Starting training...")
