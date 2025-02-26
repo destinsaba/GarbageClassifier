@@ -311,7 +311,7 @@ def evaluate_model(model, test_loader, device):
     accuracy = correct / total
     
     # Create classification report
-    class_names = sorted(os.listdir(TRAIN_PATH))
+    class_names = ['Black', 'Blue', 'Green', 'TTR']
     report = classification_report(all_labels, all_preds, target_names=class_names)
     
     # Create confusion matrix
