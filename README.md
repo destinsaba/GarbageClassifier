@@ -1,5 +1,6 @@
 # Garbage Classifier
 Group 5: Cole Cathcart, Destin Saba
+
 Neural network solution to classify garbage into appropriate waste bin based on an image and a short description.
 
 ### Instructions to run
